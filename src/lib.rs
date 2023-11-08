@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 
-use serde::{Deserialize, Serialize};
-
 mod file_log;
+pub use file_log::FileLog;
 
 /// The position of a record within a log, represented as an offset from the beginning of the log.
 type Offset = u64;
@@ -11,7 +10,6 @@ type Offset = u64;
 type Bytes = Vec<u8>;
 
 /// Represents a single record within a log, consisting of a key, a value, and a timestamp.
-#[derive(Serialize, Deserialize)]
 struct Record {
     /// The length of the value of the log entry (in bytes).
     value_length: u64,
@@ -31,9 +29,6 @@ pub enum LogError {
 
     /// Represents a system time error, typically encountered when converting between system time and Unix time.
     TimeError(std::time::SystemTimeError),
-    
-    /// Represents a serialization error, typically encountered when serializing or deserializing a record.
-    SerializationError(bincode::Error),
 }
 
 #[async_trait]

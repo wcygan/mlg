@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use crate::{Bytes, Log, LogError, Offset, Record};
 
 /// Represents the file-based log.
-struct FileLog {
+pub struct FileLog {
     file: Arc<Mutex<File>>,
 }
 
@@ -26,6 +26,12 @@ impl FileLog {
             .await
             .map_err(LogError::IoError)?;
 
+        Ok(FileLog {
+            file: Arc::new(Mutex::new(file)),
+        })
+    }
+
+    pub async fn new_with_file(file: File) -> Result<Self, LogError> {
         Ok(FileLog {
             file: Arc::new(Mutex::new(file)),
         })
@@ -52,8 +58,13 @@ impl Log for FileLog {
                 .as_millis(),
         };
 
-        // Write the record to the file
-        file.write_all(&bincode::serialize(&record)?)
+        file.write(&record.value_length.to_be_bytes())
+            .await
+            .map_err(LogError::IoError)?;
+
+        file.write(&record.value).await.map_err(LogError::IoError)?;
+
+        file.write(&record.timestamp.to_be_bytes())
             .await
             .map_err(LogError::IoError)?;
 
@@ -86,12 +97,6 @@ impl Log for FileLog {
         let _timestamp = u128::from_be_bytes(timestamp_buf);
 
         Ok(value_buf)
-    }
-}
-
-impl From<bincode::Error> for LogError {
-    fn from(error: bincode::Error) -> Self {
-        LogError::SerializationError(error)
     }
 }
 
