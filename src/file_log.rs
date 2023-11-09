@@ -1,8 +1,9 @@
 use std::sync::Arc;
+
 use async_trait::async_trait;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::{Mutex};
+use tokio::sync::{Mutex, MutexGuard};
 
 use crate::{Bytes, Log, LogError, Offset, Record};
 
@@ -29,15 +30,35 @@ impl FileLog {
         })
     }
 
-    pub async fn new_with_file(file: File) -> Result<Self, LogError> {
-        Ok(FileLog {
+    pub fn new_with_file(file: File) -> Self {
+        FileLog {
             file: Arc::new(Mutex::new(file)),
-        })
+        }
     }
-    //
-    // async fn read_one_record(&self, mut file: MutexGuard<File>) -> Result<Record, LogError> {
-    //     unimplemented!()
-    // }
+
+    /// Reads a single record from the log file.
+    async fn read_one_record(&self, offset: Offset, file: &mut MutexGuard<'_, File>) -> Result<(Record, Offset), LogError> {
+        // Read the length of the value
+        let mut length_buf = [0u8; 8];
+        file.read_exact(&mut length_buf)
+            .await
+            .map_err(LogError::IoError)?;
+        let value_length = u64::from_be_bytes(length_buf);
+
+        // Read the value
+        let mut value_buf = vec![0u8; value_length as usize];
+        file.read_exact(&mut value_buf)
+            .await
+            .map_err(LogError::IoError)?;
+
+        // Calculate the next offset
+        let next_offset = offset + std::mem::size_of::<u64>() as u64 + value_length;
+
+        Ok((Record {
+            value_length,
+            value: value_buf,
+        }, next_offset))
+    }
 }
 
 #[async_trait]
@@ -54,7 +75,7 @@ impl Log for FileLog {
         // Create a new record
         let record = Record {
             value_length: entry.len() as u64,
-            value: entry
+            value: entry,
         };
 
         file.write(&record.value_length.to_be_bytes())
@@ -70,29 +91,53 @@ impl Log for FileLog {
     async fn read(&self, offset: Offset) -> Result<(Bytes, Offset), LogError> {
         let mut file = self.file.lock().await;
 
+        let file_size = file
+            .metadata()
+            .await
+            .map_err(LogError::IoError)?
+            .len();
+
+        if offset >= file_size {
+            return Err(LogError::IndexOutOfBounds);
+        }
+
         // Seek to the offset
         file.seek(io::SeekFrom::Start(offset))
             .await
             .map_err(LogError::IoError)?;
 
-        let mut length_buf = [0u8; 8];
-        file.read_exact(&mut length_buf)
-            .await
-            .map_err(LogError::IoError)?;
-        let value_length = u64::from_be_bytes(length_buf);
+        let (record, next_offset) = self.read_one_record(offset, &mut file).await?;
 
-        let mut value_buf = vec![0u8; value_length as usize];
-        file.read_exact(&mut value_buf)
-            .await
-            .map_err(LogError::IoError)?;
-
-        let next_offset = offset + std::mem::size_of::<u64>() as u64 + value_length;
-
-        Ok((value_buf, next_offset))
+        Ok((record.value, next_offset))
     }
 
-    async fn batch_read(&self, _offset: Offset, _max_records: usize) -> Result<(Vec<Bytes>, Offset), LogError> {
-        todo!()
+    async fn batch_read(&self, offset: Offset, max_records: usize) -> Result<(Vec<Bytes>, Offset), LogError> {
+        let mut file = self.file.lock().await;
+
+        let file_size = file
+            .metadata()
+            .await
+            .map_err(LogError::IoError)?
+            .len();
+
+        if offset >= file_size {
+            return Err(LogError::IndexOutOfBounds);
+        }
+
+        file.seek(io::SeekFrom::Start(offset))
+            .await
+            .map_err(LogError::IoError)?;
+
+        let mut records = Vec::new();
+        let mut next_offset = offset;
+
+        while next_offset < file_size && records.len() < max_records {
+            let (record, offset) = self.read_one_record(next_offset, &mut file).await?;
+            records.push(record.value);
+            next_offset = offset;
+        }
+
+        Ok((records, next_offset))
     }
 }
 
