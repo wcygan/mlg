@@ -1,10 +1,8 @@
 use std::sync::Arc;
-use std::time::{SystemTime, SystemTimeError};
-
 use async_trait::async_trait;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex};
 
 use crate::{Bytes, Log, LogError, Offset, Record};
 
@@ -36,6 +34,10 @@ impl FileLog {
             file: Arc::new(Mutex::new(file)),
         })
     }
+    //
+    // async fn read_one_record(&self, mut file: MutexGuard<File>) -> Result<Record, LogError> {
+    //     unimplemented!()
+    // }
 }
 
 #[async_trait]
@@ -52,10 +54,7 @@ impl Log for FileLog {
         // Create a new record
         let record = Record {
             value_length: entry.len() as u64,
-            value: entry,
-            timestamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_millis(),
+            value: entry
         };
 
         file.write(&record.value_length.to_be_bytes())
@@ -64,14 +63,11 @@ impl Log for FileLog {
 
         file.write(&record.value).await.map_err(LogError::IoError)?;
 
-        file.write(&record.timestamp.to_be_bytes())
-            .await
-            .map_err(LogError::IoError)?;
 
         Ok(offset)
     }
 
-    async fn read(&self, offset: Offset) -> Result<Bytes, LogError> {
+    async fn read(&self, offset: Offset) -> Result<(Bytes, Offset), LogError> {
         let mut file = self.file.lock().await;
 
         // Seek to the offset
@@ -90,19 +86,13 @@ impl Log for FileLog {
             .await
             .map_err(LogError::IoError)?;
 
-        let mut timestamp_buf = [0u8; 16];
-        file.read_exact(&mut timestamp_buf)
-            .await
-            .map_err(LogError::IoError)?;
-        let _timestamp = u128::from_be_bytes(timestamp_buf);
+        let next_offset = offset + std::mem::size_of::<u64>() as u64 + value_length;
 
-        Ok(value_buf)
+        Ok((value_buf, next_offset))
     }
-}
 
-impl From<SystemTimeError> for LogError {
-    fn from(error: SystemTimeError) -> Self {
-        LogError::TimeError(error)
+    async fn batch_read(&self, _offset: Offset, _max_records: usize) -> Result<(Vec<Bytes>, Offset), LogError> {
+        todo!()
     }
 }
 

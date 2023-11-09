@@ -49,7 +49,7 @@ async fn test_read() {
         .expect("Failed to read data from log");
 
     let read_data: PersonalInfo =
-        bincode::deserialize(&read_data).expect("Failed to deserialize data");
+        bincode::deserialize(&read_data.0).expect("Failed to deserialize data");
 
     assert_eq!(read_data.name, "John Doe");
     assert_eq!(read_data.age, 42);
@@ -84,7 +84,7 @@ async fn test_read_two_records() {
         .expect("Failed to read data from log");
 
     let read_john_doe: PersonalInfo =
-        bincode::deserialize(&read_john_doe).expect("Failed to deserialize data");
+        bincode::deserialize(&read_john_doe.0).expect("Failed to deserialize data");
 
     let read_jane_doe = log
         .read(jane_offset)
@@ -92,7 +92,7 @@ async fn test_read_two_records() {
         .expect("Failed to read data from log");
 
     let read_jane_doe: PersonalInfo =
-        bincode::deserialize(&read_jane_doe).expect("Failed to deserialize data");
+        bincode::deserialize(&read_jane_doe.0).expect("Failed to deserialize data");
 
     assert_eq!(read_john_doe.name, "John Doe");
     assert_eq!(read_jane_doe.name, "Jane Doe");
@@ -100,4 +100,32 @@ async fn test_read_two_records() {
     assert_eq!(read_jane_doe.age, 43);
     assert_ne!(read_john_doe.name, read_jane_doe.name);
     assert_ne!(read_john_doe.age, read_jane_doe.age);
+}
+
+#[tokio::test]
+async fn the_next_offset_is_returned_correctly() {
+    let log = new_log().await;
+
+    let data = PersonalInfo {
+        name: "John Doe".to_string(),
+        age: 42,
+    };
+
+    let data = bincode::serialize(&data).expect("Failed to serialize data");
+    let offset = log.append(data.clone()).await.expect("Failed to append data");
+
+    let read_data = log
+        .read(offset)
+        .await
+        .expect("Failed to read data from log");
+
+    let next_offset = read_data.1;
+
+    assert_eq!(next_offset, offset + std::mem::size_of::<u64>() as u64 + data.len() as u64);
+}
+
+
+#[tokio::test]
+async fn the_log_does_not_read_past_the_maximum_offset() {
+
 }
