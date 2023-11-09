@@ -250,7 +250,8 @@ async fn test_batch_read_data_integrity_and_order() {
     }
 }
 
-/// Tests that concurrent writes to the log work correctly.
+/// This test will append two records concurrently and ensure that both writes succeed
+/// and that the log contains both entries, no matter the order in which they are written.
 #[tokio::test]
 async fn test_concurrent_writes() {
     let log = Arc::new(new_log().await);
@@ -280,4 +281,46 @@ async fn test_concurrent_writes() {
     // Read back the log to ensure both records were written.
     let (records, _) = log.batch_read(0, 2).await.expect("Failed to batch read from log");
     assert_eq!(records.len(), 2, "Both records should have been written");
+
+    let record1: PersonalInfo = bincode::deserialize(&records[0]).expect("Failed to deserialize data");
+    let record2: PersonalInfo = bincode::deserialize(&records[1]).expect("Failed to deserialize data");
+
+    assert!(record1.name == "ConcurrentUser1" || record1.name == "ConcurrentUser2");
+    assert!(record2.name == "ConcurrentUser1" || record2.name == "ConcurrentUser2");
+    assert_ne!(record1.name, record2.name);
+    assert!(record1.age == 25 || record1.age == 26);
+    assert!(record2.age == 25 || record2.age == 26);
+    assert_ne!(record1.age, record2.age);
+}
+
+/// This test will write a record to the log and then concurrently
+/// read it from multiple tasks to ensure that they all see the same value.
+#[tokio::test]
+async fn test_concurrent_reads_after_write() {
+    let log = Arc::new(new_log().await);
+
+    // Append a record.
+    let offset = append_record(&log, "User", 30).await;
+
+    // Concurrently read the record from multiple tasks.
+    let mut handles = Vec::new();
+    for _ in 0..10 {
+        let log_clone = log.clone();
+        handles.push(tokio::spawn(async move {
+            log_clone.read(offset).await.expect("Failed to read data from log")
+        }));
+    }
+
+    // Collect the results.
+    let results = futures::future::join_all(handles).await;
+
+    assert_eq!(results.len(), 10, "Expected 10 results, got {}", results.len());
+
+    // Check that all tasks read the same value.
+    for res in results {
+        let (bytes, _) = res.expect("Task failed");
+        let record: PersonalInfo = bincode::deserialize(&bytes).expect("Failed to deserialize data");
+        assert_eq!(record.name, "User");
+        assert_eq!(record.age, 30);
+    }
 }
