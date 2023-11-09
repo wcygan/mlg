@@ -5,10 +5,10 @@ mod file_log;
 pub use file_log::FileLog;
 
 /// The position of a record within a log, represented as an offset from the beginning of the log.
-type Offset = u64;
+pub type Offset = u64;
 
 /// A byte vector, used to represent binary data.
-type Bytes = Vec<u8>;
+pub type Bytes = Vec<u8>;
 
 /// Represents a single record within a log, consisting of a key, a value, and a timestamp.
 struct Record {
@@ -24,6 +24,10 @@ struct Record {
 pub enum LogError {
     /// Represents an I/O error, typically encountered during file operations (read/write).
     IoError(std::io::Error),
+
+    /// Represents an error encountered while attempting to read a record from the log
+    /// that does not exist.
+    IndexOutOfBounds,
 }
 
 #[async_trait]
