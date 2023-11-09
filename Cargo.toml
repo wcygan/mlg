@@ -3,10 +3,11 @@ name = "mlg"
 version = "0.1.0"
 edition = "2021"
 authors = ["Will Cygan <wcygan.io@gmail.com>"]
-description = "An asynchronous Write-Ahead Log (WAL) for Rust"
+description = "An asynchronous Log for Rust"
 categories = ["Data structures", "asynchronous", "asynchronous"]
-keywords = ["async", "asynchronous", "wal", "log"]
+keywords = ["async", "asynchronous", "log"]
 repository = "https://github.com/wcygan/mlg"
+license = "MIT"
 
 [[test]]
 name = "test"
