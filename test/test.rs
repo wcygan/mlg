@@ -324,3 +324,40 @@ async fn test_concurrent_reads_after_write() {
         assert_eq!(record.age, 30);
     }
 }
+
+/// This test ensures that a read following a write will always see the latest written value,
+/// even when both operations are performed concurrently.
+#[tokio::test]
+async fn test_write_read_consistency() {
+    let log = Arc::new(new_log().await);
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+
+    // Spawn a task to write to the log.
+    let write_handle = tokio::spawn({
+        let log = log.clone();
+        let barrier = barrier.clone();
+        async move {
+            append_record(&log, "ConsistentUser", 40).await;
+            barrier.wait().await;
+        }
+    });
+
+    // Immediately spawn a task to read from the log.
+    let read_handle = tokio::spawn({
+        let log = log.clone();
+        let barrier = barrier.clone();
+        async move {
+            barrier.wait().await;
+            log.read(0).await
+        }
+    });
+
+    // Wait for both the write and read to complete.
+    let (_, read_result) = tokio::try_join!(write_handle, read_handle).expect("Concurrency test failed");
+
+    // Check that the read task got the value written by the write task.
+    let (bytes, _) = read_result.expect("Failed to read data from log");
+    let record: PersonalInfo = bincode::deserialize(&bytes).expect("Failed to deserialize data");
+    assert_eq!(record.name, "ConsistentUser");
+    assert_eq!(record.age, 40);
+}
